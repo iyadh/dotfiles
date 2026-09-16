@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Block commits on the protected branch and staged secrets.
+# The built-in scan always runs; gitleaks runs on top when installed.
+# Mark a known false positive by adding "gitleaks:allow" to that line.
+set -eo pipefail
+. "$(dirname "$0")/lib.sh"
+
+branch=$(git symbolic-ref --short -q HEAD || true)
+if [[ $branch == "$PROTECTED_BRANCH" ]]; then
+  err "Direct commits to $PROTECTED_BRANCH are not allowed. Work on a branch and open a PR:"
+  hint "git switch -c <type>/<issue>-<slug>"
+  exit 1
+fi
+
+hits=()
+
+# Files that should never be in a public dotfiles repo, whatever they contain.
+while IFS= read -r path; do
+  [[ -z $path ]] && continue
+  base=${path##*/}
+  case $base in
+    *.pub | .env.example | .env.sample | .env.template) ;;
+    .netrc | .pgpass | .env | .env.* | id_rsa | id_dsa | id_ecdsa | id_ed25519 | \
+      *.pem | *.key | *.p12 | *.pfx | *.kdbx | *.keychain | credentials)
+      hits+=("$path  (sensitive file)") ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACR)
+
+# Added lines as "path:line<TAB>content". Brackets like [t] keep this file from matching itself.
+names=() patterns=()
+add_pattern() { names+=("$1"); patterns+=("$2"); }
+add_pattern "private key" '-----BEGIN ([A-Z]+ )*PRIVATE KEY( BLOCK)?-----'
+add_pattern "GitHub token" 'gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}'
+add_pattern "GitHub CLI token" 'oauth_[t]oken:[[:space:]]*[^[:space:]]'
+add_pattern "API key (sk-...)" 'sk-[A-Za-z0-9_-]{20,}'
+add_pattern "Stripe key" '(sk|rk)_live_[0-9A-Za-z]{24,}'
+add_pattern "AWS access key" '(A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16}'
+add_pattern "Google API key" 'AIza[0-9A-Za-z_-]{35}'
+add_pattern "Slack token" 'xox[abposr]-[A-Za-z0-9-]{10,}'
+add_pattern "npm token" 'npm_[A-Za-z0-9]{36}|_auth[T]oken=[^$[:space:]]'
+
+added=$(
+  git diff --cached -U0 --no-color --no-ext-diff --diff-filter=ACMR |
+    awk '
+      /^\+\+\+ b\// { file = substr($0, 7); next }
+      /^@@ / { split($3, range, ","); line = substr(range[1], 2); next }
+      /^\+/ { print file ":" line "\t" substr($0, 2); line++ }
+    ' |
+    grep -v 'gitleaks:allow' || true
+)
+
+if [[ -n $added ]]; then
+  for i in "${!patterns[@]}"; do
+    while IFS= read -r location; do
+      [[ -n $location ]] && hits+=("$location  (${names[$i]})")
+    done < <(printf '%s\n' "$added" | grep -E -- "${patterns[$i]}" | cut -f1 || true)
+  done
+fi
+
+status=0
+
+if ((${#hits[@]} > 0)); then
+  err "Possible secrets staged:"
+  for h in "${hits[@]}"; do hint "- $h"; done
+  status=1
+fi
+
+if command -v gitleaks >/dev/null 2>&1; then
+  if gitleaks git --help >/dev/null 2>&1; then
+    gitleaks git --pre-commit --staged --redact --no-banner || status=1
+  else
+    gitleaks protect --staged --redact --no-banner || status=1
+  fi
+fi
+
+if ((status != 0)); then
+  hint ""
+  hint "Unstage it (git restore --staged <file>) and keep secrets out of the repo."
+  hint "False positive? Add \"gitleaks:allow\" to the line."
+fi
+exit $status

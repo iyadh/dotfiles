@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Enforce "<emoji> <type>(<scope>): <subject>" (Conventional Commits + gitmoji)
+# and reject AI attribution. See docs/agents/git-workflow.md.
+set -eo pipefail
+. "$(dirname "$0")/lib.sh"
+export LC_ALL=C
+
+msg_file=$1
+vs16=$(printf '\357\270\217') # U+FE0F variation selector
+
+# Drop comments and the verbose diff below the scissors line, then leading blank lines.
+message=$(sed -e '/^# -* >8 -*$/,$d' -e '/^#/d' "$msg_file" | sed '/[^[:space:]]/,$!d')
+subject=$(printf '%s\n' "$message" | sed -n '1p')
+second_line=$(printf '%s\n' "$message" | sed -n '2p')
+
+# Let git's own generated messages through.
+case $subject in
+  '' | 'Merge '* | 'fixup! '* | 'squash! '* | 'amend! '*) exit 0 ;;
+esac
+
+errors=()
+
+if printf '%s\n' "$message" | grep -qiE '^co-authored-by:.*(claude|anthropic)|generated with \[?claude code'; then
+  errors+=("AI attribution is not allowed (Co-Authored-By: Claude / \"Generated with Claude Code\")")
+fi
+
+normalized=${subject//$vs16/}
+emoji=${normalized%% *}
+rest=${normalized#* }
+subject_re="^(${TYPE_PATTERN})(\([a-z0-9][a-z0-9._/-]*\))?(!)?: (.+)$"
+
+if [[ $normalized != *' '* || ! $rest =~ $subject_re ]]; then
+  errors+=("subject must look like \"<emoji> <type>(<scope>): <subject>\"")
+else
+  type=${BASH_REMATCH[1]}
+  bang=${BASH_REMATCH[3]}
+  text=${BASH_REMATCH[4]}
+  expected=$(emoji_for "$type")
+
+  if [[ -n $bang && $emoji != "$BREAKING_EMOJI" ]]; then
+    errors+=("breaking changes (\"$type!\") must start with $BREAKING_EMOJI")
+  elif [[ -z $bang && $emoji == "$BREAKING_EMOJI" ]]; then
+    errors+=("$BREAKING_EMOJI is for breaking changes: add \"!\" after the type/scope")
+  elif [[ -z $bang && $emoji != "$expected" ]]; then
+    errors+=("\"$type\" commits must start with $expected")
+  fi
+
+  [[ $text =~ ^[A-Z] ]] && errors+=("subject must start lowercase")
+  [[ $text == *. ]] && errors+=("subject must not end with a period")
+fi
+
+# Count characters by dropping UTF-8 continuation bytes; wc -m depends on installed locales.
+length=$(printf '%s' "$normalized" | tr -d '\200-\277' | wc -c | tr -d ' ')
+((length > 72)) && errors+=("first line is $length characters (max 72)")
+
+[[ -n $second_line ]] && errors+=("leave a blank line between the subject and the body")
+
+if ((${#errors[@]} > 0)); then
+  err "Commit message rejected:"
+  for e in "${errors[@]}"; do hint "- $e"; done
+  hint ""
+  hint "Format:  <emoji> <type>(<scope>): <subject>"
+  hint "Example: ✨ feat(zsh): add fzf keybindings"
+  hint "Types:   $COMMIT_TYPES (breaking: $BREAKING_EMOJI type!)"
+  hint "Rules:   docs/agents/git-workflow.md"
+  hint ""
+  hint "Retry with your message: git commit -e -F $msg_file"
+  exit 1
+fi

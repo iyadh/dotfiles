@@ -1,0 +1,42 @@
+# Server-side checks for what local hooks can't enforce. Reuses .githooks/ so the rules live in one place.
+name: Conventions
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  pr:
+    name: PR title and branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Squash merges turn the PR title and body into the commit on master.
+      - name: Check squash commit message
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/message"
+          .githooks/commit-msg "$RUNNER_TEMP/message"
+
+      - name: Check branch name
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          . .githooks/lib.sh
+          if [[ ! $HEAD_REF =~ $BRANCH_RE ]]; then
+            err "Branch \"$HEAD_REF\" doesn't match <type>/<issue>-<slug>."
+            exit 1
+          fi
+
+  hooks:
+    name: Hook tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/test-hooks.sh
