@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Block pushes to the protected branch and enforce "<type>/<issue>-<slug>" branch names.
+set -eo pipefail
+. "$(dirname "$0")/lib.sh"
+
+status=0
+
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  case $remote_ref in
+    refs/heads/*) branch=${remote_ref#refs/heads/} ;;
+    *) continue ;; # tags and other refs
+  esac
+
+  if [[ $branch == "$PROTECTED_BRANCH" ]]; then
+    err "Pushing to $PROTECTED_BRANCH is not allowed. Push a branch and open a PR."
+    status=1
+    continue
+  fi
+
+  # Deleting a remote branch: its name doesn't matter.
+  [[ $local_sha =~ ^0+$ ]] && continue
+
+  if [[ ! $branch =~ $BRANCH_RE ]]; then
+    err "Branch \"$branch\" doesn't match <type>/<issue>-<slug>."
+    hint "Example: feat/12-zsh-fzf-keybindings"
+    hint "Rename:  git branch -m <new-name>"
+    status=1
+  fi
+done
+
+exit $status
