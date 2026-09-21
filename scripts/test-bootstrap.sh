@@ -2,42 +2,42 @@
 # Bootstrap fresh Machines in a throwaway container and check the result.
 # Run: scripts/test-bootstrap.sh [debian|arch] (needs Docker). Tests the working tree, committed or not.
 #
-#   debian  a Managed Machine (the homelab and the VPS)
-#   arch    a Workstation (the EndeavourOS laptop's configs, not its packages)
+#   debian  a Managed Machine
+#   arch    a Workstation (the EndeavourOS Workstation's configs, not its packages)
 #
 # Runs in three stages: outside Docker it starts the container; in the container,
 # as root, it installs what any Machine has (git, curl) and adds a user; as that
 # user it runs the checks, each scenario in its own fresh home directory.
 set -uo pipefail
 
-user=tester platform=
+user=tester
+distro=${1:-debian}
 
-case ${1:-debian} in
+case $distro in
   debian | arch)
-    distro=${1:-debian}
     repo=$(cd "$(dirname "$0")/.." && pwd)
+    platform_flag=
     case $distro in
-      debian) image=debian:stable-slim ;;
-      arch) image=archlinux:base platform=--platform=linux/amd64 ;; # Arch images are amd64 only
+      debian) image=debian:stable-slim kind=managed ;;
+      arch) image=archlinux:base kind=workstation platform_flag=--platform=linux/amd64 ;; # Arch images are amd64 only
     esac
-    exec docker run --rm ${platform:+"$platform"} -v "$repo:/src:ro" "$image" \
-      bash /src/scripts/test-bootstrap.sh --setup "$distro"
+    exec docker run --rm ${platform_flag:+"$platform_flag"} -v "$repo:/src:ro" "$image" \
+      bash /src/scripts/test-bootstrap.sh --setup "$distro" "$kind"
     ;;
   --setup)
     case $2 in
       debian)
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq >/dev/null && apt-get install -y -qq git curl ca-certificates >/dev/null || exit 1
-        kind=managed
         ;;
       arch)
         # The download sandbox fails under amd64 emulation (Apple Silicon); nothing to protect here.
         pacman -Sy --noconfirm --needed --quiet --disable-sandbox git curl >/dev/null || exit 1
-        kind=workstation
         ;;
+      *) exit 2 ;;
     esac
     useradd --create-home "$user"
-    exec runuser -u "$user" -- bash /src/scripts/test-bootstrap.sh --checks "$kind"
+    exec runuser -u "$user" -- bash /src/scripts/test-bootstrap.sh --checks "$3"
     ;;
   --checks) kind=$2 ;;
   *) echo "usage: $0 [debian|arch]" >&2 && exit 2 ;;
