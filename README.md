@@ -47,5 +47,5 @@ Branching, commit format, and what the hooks check: [docs/agents/git-workflow.md
 Checks, also run on every PR:
 
 - `scripts/test-hooks.sh`: the git hooks.
-- `scripts/test-bootstrap.sh`: Bootstrap on fresh Debian containers (needs Docker).
+- `scripts/test-bootstrap.sh [debian|arch]`: Bootstrap in a fresh container: Debian as a Managed Machine, Arch as a Workstation (needs Docker).
 - `scripts/shellcheck.sh`: every shell script, hooks included.
