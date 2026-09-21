@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Block pushes to the protected branch and enforce "<type>/<issue>-<slug>" branch names.
 set -eo pipefail
+# shellcheck source=.githooks/lib.sh
 . "$(dirname "$0")/lib.sh"
 
 status=0

@@ -3,6 +3,7 @@
 # The built-in scan always runs; gitleaks runs on top when installed.
 # Mark a known false positive by adding "gitleaks:allow" to that line.
 set -eo pipefail
+# shellcheck source=.githooks/lib.sh
 . "$(dirname "$0")/lib.sh"
 
 branch=$(git symbolic-ref --short -q HEAD || true)

@@ -66,7 +66,7 @@ git config core.hooksPath .githooks
 
 - Mark a false-positive secret by adding `gitleaks:allow` to that line.
 - Types, emoji, and the protected branch are defined once in `.githooks/lib.sh`. Change them there and in this document together.
-- After changing a hook, run `scripts/test-hooks.sh`.
+- After changing a hook, run `scripts/test-hooks.sh` and `scripts/shellcheck.sh`.
 - Never bypass the hooks with `--no-verify` unless the user explicitly asks.
 
-On GitHub, `.github/workflows/conventions.yml` runs the same `commit-msg` hook against each PR's title and body (the future squash commit), checks the branch name, and runs `scripts/test-hooks.sh`. Branch protection on `master` requires a PR with passing checks, applies to admins, and the repo allows squash merges only.
+On GitHub, `.github/workflows/conventions.yml` runs the same `commit-msg` hook against each PR's title and body (the future squash commit), checks the branch name, and runs `scripts/test-hooks.sh` and `scripts/shellcheck.sh`. The Bootstrap workflow runs `scripts/test-bootstrap.sh`. Branch protection on `master` requires a PR with passing checks, applies to admins, and the repo allows squash merges only.

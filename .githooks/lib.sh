@@ -1,3 +1,4 @@
+# shellcheck shell=bash disable=SC2034 # the hooks that source this use its variables
 # Shared by the hooks in this directory. Keep in sync with docs/agents/git-workflow.md.
 # Written for macOS's bash 3.2: no associative arrays, no ${var,,}.
 
