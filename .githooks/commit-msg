@@ -2,6 +2,7 @@
 # Enforce "<emoji> <type>(<scope>): <subject>" (Conventional Commits + gitmoji)
 # and reject AI attribution. See docs/agents/git-workflow.md.
 set -eo pipefail
+# shellcheck source=.githooks/lib.sh
 . "$(dirname "$0")/lib.sh"
 export LC_ALL=C
 

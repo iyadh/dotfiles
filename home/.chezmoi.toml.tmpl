@@ -1,0 +1,7 @@
+{{- /* "Machine kind" is also the prompt bootstrap.sh answers from DOTFILES_KIND. */ -}}
+{{- $kind := promptChoiceOnce . "kind" "Machine kind" (list "workstation" "managed") -}}
+sourceDir = {{ .chezmoi.workingTree | quote }}
+mode = "symlink"
+
+[data]
+kind = {{ $kind | quote }}

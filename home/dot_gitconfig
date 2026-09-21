@@ -1,0 +1,10 @@
+[core]
+	autocrlf = input
+[push]
+	autoSetupRemote = true
+[init]
+	defaultBranch = master
+# Local override, never tracked: identity ([user] name and email) and per-client
+# identities from each client folder's own config file. Included last, so it wins.
+[include]
+	path = ~/.gitconfig.local
