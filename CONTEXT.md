@@ -18,16 +18,12 @@ _Avoid_: dev machine, main machine, daily driver
 A Machine you work with over SSH: logs, containers, updates. Gets the Portable core only.
 _Avoid_: server, remote, box, headless
 
-**Corporate Machine**:
-A Machine governed by someone else's policy. Gets whatever part of the Portable core its rules allow, and is never a Trusted Machine.
-_Avoid_: work machine, locked-down machine
-
 **Trusted Machine**:
 A Machine allowed to reach the Vault. Workstations only.
 _Avoid_: personal machine, secure machine
 
 **Portable core**:
-The part of the setup that works on every Machine and every OS: the shell, prompt, and git.
+The part of the setup that works on every Machine: the shell, prompt, and git.
 _Avoid_: minimal setup, base config
 
 **Bootstrap**:
