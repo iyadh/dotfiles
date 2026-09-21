@@ -69,4 +69,4 @@ git config core.hooksPath .githooks
 - After changing a hook, run `scripts/test-hooks.sh` and `scripts/shellcheck.sh`.
 - Never bypass the hooks with `--no-verify` unless the user explicitly asks.
 
-On GitHub, `.github/workflows/conventions.yml` runs the same `commit-msg` hook against each PR's title and body (the future squash commit), checks the branch name, and runs `scripts/test-hooks.sh` and `scripts/shellcheck.sh`. The Bootstrap workflow runs `scripts/test-bootstrap.sh`. Branch protection on `master` requires a PR with passing checks, applies to admins, and the repo allows squash merges only.
+On GitHub, `.github/workflows/conventions.yml` runs the same `commit-msg` hook against each PR's title and body (the future squash commit), checks the branch name, and runs `scripts/test-hooks.sh` and `scripts/shellcheck.sh`. The Bootstrap workflow runs `scripts/test-bootstrap.sh` in Debian and Arch. Branch protection on `master` requires a PR with passing checks, applies to admins, and the repo allows squash merges only.

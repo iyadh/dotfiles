@@ -1,27 +1,46 @@
 #!/usr/bin/env bash
-# Bootstrap fresh Machines in a throwaway Debian container and check the result.
-# Run: scripts/test-bootstrap.sh (needs Docker). Tests the working tree, committed or not.
+# Bootstrap fresh Machines in a throwaway container and check the result.
+# Run: scripts/test-bootstrap.sh [debian|arch] (needs Docker). Tests the working tree, committed or not.
+#
+#   debian  a Managed Machine (the homelab and the VPS)
+#   arch    a Workstation (the EndeavourOS laptop's configs, not its packages)
 #
 # Runs in three stages: outside Docker it starts the container; in the container,
 # as root, it installs what any Machine has (git, curl) and adds a user; as that
 # user it runs the checks, each scenario in its own fresh home directory.
 set -uo pipefail
 
-user=tester
+user=tester platform=
 
-case ${1:-} in
-  "")
+case ${1:-debian} in
+  debian | arch)
+    distro=${1:-debian}
     repo=$(cd "$(dirname "$0")/.." && pwd)
-    exec docker run --rm -v "$repo:/src:ro" debian:stable-slim bash /src/scripts/test-bootstrap.sh --setup
+    case $distro in
+      debian) image=debian:stable-slim ;;
+      arch) image=archlinux:base platform=--platform=linux/amd64 ;; # Arch images are amd64 only
+    esac
+    exec docker run --rm ${platform:+"$platform"} -v "$repo:/src:ro" "$image" \
+      bash /src/scripts/test-bootstrap.sh --setup "$distro"
     ;;
   --setup)
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq >/dev/null && apt-get install -y -qq git curl ca-certificates >/dev/null || exit 1
+    case $2 in
+      debian)
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq >/dev/null && apt-get install -y -qq git curl ca-certificates >/dev/null || exit 1
+        kind=managed
+        ;;
+      arch)
+        # The download sandbox fails under amd64 emulation (Apple Silicon); nothing to protect here.
+        pacman -Sy --noconfirm --needed --quiet --disable-sandbox git curl >/dev/null || exit 1
+        kind=workstation
+        ;;
+    esac
     useradd --create-home "$user"
-    exec runuser -u "$user" -- bash /src/scripts/test-bootstrap.sh --checks
+    exec runuser -u "$user" -- bash /src/scripts/test-bootstrap.sh --checks "$kind"
     ;;
-  --checks) ;;
-  *) echo "usage: $0" >&2 && exit 2 ;;
+  --checks) kind=$2 ;;
+  *) echo "usage: $0 [debian|arch]" >&2 && exit 2 ;;
 esac
 
 tmp=$(mktemp -d)
@@ -73,12 +92,12 @@ snapshot() {
     done
 }
 
-# --- Run from a clone, Managed Machine ------------------------------------
+# --- Run from a clone ------------------------------------------------------
 
 fresh_machine
 clone_to "$HOME/.dotfiles"
 
-check pass "bootstrap from the clone" env DOTFILES_KIND=managed "$HOME/.dotfiles/bootstrap.sh"
+check pass "bootstrap from the clone" env DOTFILES_KIND="$kind" "$HOME/.dotfiles/bootstrap.sh"
 PATH=$HOME/.local/bin:$PATH # later scenarios reuse this chezmoi instead of downloading it again
 
 check pass "chezmoi installed without root" test -x "$HOME/.local/bin/chezmoi"
@@ -87,7 +106,7 @@ check pass "git ignore is a symlink into the clone" linked .config/git/ignore
 check pass "git reads the tracked config" is "$(git config --global init.defaultBranch)" master
 check pass "chezmoi has nothing to apply" chezmoi verify
 check pass "clone's hooks path points at its hooks" is "$(git -C "$HOME/.dotfiles" config core.hooksPath)" .githooks
-check pass "Machine kind recorded" is "$(chezmoi execute-template '{{ .kind }}')" managed
+check pass "Machine kind recorded" is "$(chezmoi execute-template '{{ .kind }}')" "$kind"
 check fail "tracked git config names no client folder" grep -qi includeif "$HOME/.gitconfig"
 check fail "tracked git config holds no identity" git config --file "$HOME/.gitconfig" --get-regexp "^user\\."
 
@@ -98,7 +117,7 @@ check pass "second run changes nothing" is "$(snapshot)" "$before"
 printf '[user]\n\temail = client@example.com\n' >"$HOME/.gitconfig.local"
 check pass "Local override is loaded" is "$(git -C "$HOME" config user.email)" client@example.com
 
-# --- Piped from a URL, Workstation -----------------------------------------
+# --- Piped from a URL ------------------------------------------------------
 
 origin=$tmp/origin
 cp -a /src "$origin"
@@ -106,14 +125,14 @@ git -C "$origin" add -A
 git -C "$origin" -c user.name=t -c user.email=t@t -c core.hooksPath=/dev/null commit -qm test --allow-empty
 
 fresh_machine
-piped() { DOTFILES_REPO=$origin DOTFILES_KIND=workstation timeout 120 bash <"$origin/bootstrap.sh"; }
+piped() { DOTFILES_REPO=$origin DOTFILES_KIND=$kind timeout 120 bash <"$origin/bootstrap.sh"; }
 
 check pass "bootstrap piped into bash" piped
 check pass "repo cloned to ~/.dotfiles" test -f "$HOME/.dotfiles/.chezmoiroot"
 check pass "git config is a symlink into the clone" linked .gitconfig
 check pass "chezmoi has nothing to apply" chezmoi verify
 check pass "clone's hooks path points at its hooks" is "$(git -C "$HOME/.dotfiles" config core.hooksPath)" .githooks
-check pass "Machine kind recorded" is "$(chezmoi execute-template '{{ .kind }}')" workstation
+check pass "Machine kind recorded" is "$(chezmoi execute-template '{{ .kind }}')" "$kind"
 check pass "piping again reuses the clone" piped
 
 # --- A config chezmoi didn't create ----------------------------------------
@@ -123,7 +142,7 @@ clone_to "$HOME/.dotfiles"
 printf '[user]\n\tname = Someone Else\n' >"$HOME/.gitconfig"
 existing=$(cat "$HOME/.gitconfig")
 
-check fail "bootstrap stops" env DOTFILES_KIND=managed "$HOME/.dotfiles/bootstrap.sh"
+check fail "bootstrap stops" env DOTFILES_KIND="$kind" "$HOME/.dotfiles/bootstrap.sh"
 check pass "it names the file" grep -q "$HOME/.gitconfig" "$tmp/last"
 check pass "existing config is untouched" is "$(cat "$HOME/.gitconfig")" "$existing"
 check fail "existing config not replaced by a symlink" test -L "$HOME/.gitconfig"
@@ -134,7 +153,7 @@ check fail "nothing else applied" test -e "$HOME/.config/git/ignore"
 fresh_machine
 clone_to "$HOME/src/dotfiles"
 
-check fail "bootstrap refuses a clone outside ~/.dotfiles" env DOTFILES_KIND=managed "$HOME/src/dotfiles/bootstrap.sh"
+check fail "bootstrap refuses a clone outside ~/.dotfiles" env DOTFILES_KIND="$kind" "$HOME/src/dotfiles/bootstrap.sh"
 check fail "nothing applied" test -e "$HOME/.gitconfig"
 
 # --- No way to ask the Machine kind ----------------------------------------

@@ -8,9 +8,17 @@ permissions:
   contents: read
 
 jobs:
-  debian:
-    name: Debian
+  container:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # report both containers, whichever fails first
+      matrix:
+        include:
+          - name: Debian # Managed Machine
+            distro: debian
+          - name: Arch # Workstation
+            distro: arch
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/test-bootstrap.sh
+      - run: scripts/test-bootstrap.sh ${{ matrix.distro }}
