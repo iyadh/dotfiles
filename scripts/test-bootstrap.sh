@@ -109,6 +109,22 @@ check pass "clone's hooks path points at its hooks" is "$(git -C "$HOME/.dotfile
 check pass "Machine kind recorded" is "$(chezmoi execute-template '{{ .kind }}')" "$kind"
 check fail "tracked git config names no client folder" grep -qi includeif "$HOME/.gitconfig"
 check fail "tracked git config holds no identity" git config --file "$HOME/.gitconfig" --get-regexp "^user\\."
+# Split so this file doesn't match its own scan of the clone.
+secret_var=MAVEN_PUBLICATION"_PASSWORD"
+check fail "no Secret anywhere in the clone" grep -rq "$secret_var" "$HOME/.dotfiles"
+
+# Workstation-only Tracked configs: the zsh startup files assume a Workstation.
+if [[ $kind == workstation ]]; then
+  for startup_file in .zshrc .zprofile .zshenv .zlogin; do
+    check pass "$startup_file is a symlink into the clone" linked "$startup_file"
+  done
+  check fail "tracked zprofile holds no Secret" grep -q "$secret_var" "$HOME/.zprofile"
+  check pass "zprofile loads its Local override" grep -q "[.]zprofile[.]local" "$HOME/.zprofile"
+  check pass "zshrc loads its Local override" grep -q "[.]zshrc[.]local" "$HOME/.zshrc"
+else
+  check fail "Managed Machines get no zshrc" test -e "$HOME/.zshrc"
+  check fail "Managed Machines get no zprofile" test -e "$HOME/.zprofile"
+fi
 
 before=$(snapshot)
 check pass "second run needs no answers" bootstrap
