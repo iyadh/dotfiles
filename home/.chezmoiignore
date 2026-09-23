@@ -1,0 +1,7 @@
+{{/* The zsh startup files assume a Workstation; Managed Machines get the Portable core only. */}}
+{{ if ne .kind "workstation" -}}
+.zshrc
+.zprofile
+.zshenv
+.zlogin
+{{ end -}}

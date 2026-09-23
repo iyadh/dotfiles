@@ -18,6 +18,8 @@ Bootstrap installs [chezmoi](https://chezmoi.io) into `~/.local/bin`, asks once 
 
 It never overwrites a config chezmoi didn't create. If one exists, Bootstrap lists it and stops without changing anything: move it aside and run it again.
 
+Workstations get every Tracked config; Managed Machines get the Portable core only, so the zsh startup files are skipped there (`home/.chezmoiignore`).
+
 Tracked configs live in `home/` (chezmoi's source, selected by `.chezmoiroot`). Everything else is repo tooling.
 
 ## Local overrides
@@ -33,6 +35,8 @@ Identity (real name, email), and anything tied to one Machine or to work, stays 
   [includeIf "gitdir:~/projects/<client>/"]
       path = ~/projects/<client>/.gitconfig
   ```
+
+- **zsh**: `~/.zprofile.local` and `~/.zshrc.local`, sourced by the tracked files when they exist. Work credentials, work-only aliases and per-Machine settings live here. Credentials come from the Vault; export them by hand.
 
 ## Contributing
 
