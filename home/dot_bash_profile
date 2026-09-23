@@ -1,0 +1,5 @@
+# A login bash reads this and not ~/.bashrc, so hand it straight over: one
+# entry point for both, the way zsh already treats ~/.zshrc.
+if [ -r "$HOME/.bashrc" ]; then
+  . "$HOME/.bashrc"
+fi
