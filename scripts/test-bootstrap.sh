@@ -120,6 +120,18 @@ startup_var() { # startup_var <bash|zsh> <name>
 # The PATH an interactive shell ends up with, one entry per line.
 startup_path() { startup_var "$1" PATH | tr ':' '\n'; }
 
+# starship reads its config on every prompt and reports a bad one on stderr, so
+# silence is the pass. check reports this function's output, which is the
+# complaint itself — the config's own text can't be the signal, since it
+# legitimately contains words like "error_symbol".
+starship_accepts_its_config() {
+  local complaints
+  complaints=$({ starship print-config >/dev/null; } 2>&1)
+  [[ -z $complaints ]] && return 0
+  printf '%s\n' "$complaints"
+  return 1
+}
+
 # check reports this function's output, so a mismatch shows what the shell
 # actually had, and what it complained about on the way there.
 has_var() { # has_var <bash|zsh> <name> <value>
@@ -186,6 +198,8 @@ PATH=$HOME/.local/bin:$PATH # later scenarios reuse this chezmoi instead of down
 check pass "chezmoi installed without root" test -x "$HOME/.local/bin/chezmoi"
 check pass "git config is a symlink into the clone" linked .gitconfig
 check pass "git ignore is a symlink into the clone" linked .config/git/ignore
+# The prompt is part of the Portable core, so every Machine kind gets it.
+check pass "starship config is a symlink into the clone" linked .config/starship.toml
 check pass "git reads the tracked config" is "$(git config --global init.defaultBranch)" master
 check pass "chezmoi has nothing to apply" chezmoi verify
 check pass "clone's hooks path points at its hooks" is "$(git -C "$HOME/.dotfiles" config core.hooksPath)" .githooks
@@ -206,6 +220,14 @@ for tool in starship fzf zoxide; do
     check fail "$tool not installed on a Workstation" command -v "$tool"
   fi
 done
+
+# Wherever starship is installed, make it read the Imported config for real: a
+# file that parses on the Mac can still be rejected by the older starship a
+# distribution packages. Asked of starship's presence rather than the Machine
+# kind, so a Workstation that gains starship is checked too.
+if command -v starship >/dev/null; then
+  check pass "starship accepts the tracked config" starship_accepts_its_config
+fi
 
 # Shell layers. Every Machine gets the portable and zsh layers now; the macOS
 # layer belongs to a Mac alone, and neither container is one.
