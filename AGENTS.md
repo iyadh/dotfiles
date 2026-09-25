@@ -1,5 +1,11 @@
 ## Agent skills
 
+### GitHub
+
+Anything that touches GitHub rather than the git repository goes through the `gh` CLI: issues, pull requests, reviews, labels, workflow runs, checks, releases, and whatever has no command of its own via `gh api`. Plain `git` still does the git half — commit, branch, push, rebase.
+
+Don't reach for the web UI, and don't `curl` `api.github.com` by hand: `gh` already carries the authentication and knows the repo from the clone it runs in.
+
 ### Issue tracker
 
 Issues live in GitHub Issues for iyadh/dotfiles, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
