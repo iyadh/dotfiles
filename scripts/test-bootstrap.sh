@@ -28,18 +28,22 @@ case $distro in
     case $2 in
       debian)
         export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq >/dev/null && apt-get install -y -qq git curl ca-certificates >/dev/null || exit 1
+        apt-get update -qq >/dev/null && apt-get install -y -qq git curl ca-certificates zsh >/dev/null || exit 1
         ;;
       arch)
         # The download sandbox fails under amd64 emulation (Apple Silicon); nothing to protect here.
-        pacman -Sy --noconfirm --needed --quiet --disable-sandbox git curl >/dev/null || exit 1
+        pacman -Sy --noconfirm --needed --quiet --disable-sandbox git curl zsh >/dev/null || exit 1
         ;;
       *) exit 2 ;;
     esac
     useradd --create-home "$user"
     exec runuser -u "$user" -- bash /src/scripts/test-bootstrap.sh --checks "$3"
     ;;
-  --checks) kind=$2 ;;
+  # A real terminal always says what it is, and tools like tput need to know.
+  --checks)
+    kind=$2
+    export TERM=${TERM:-xterm-256color}
+    ;;
   *) echo "usage: $0 [debian|arch]" >&2 && exit 2 ;;
 esac
 
@@ -80,6 +84,57 @@ bootstrap() { timeout 120 "$HOME/.dotfiles/bootstrap.sh" </dev/null; }
 linked() { [[ -L $HOME/$1 && $(readlink "$HOME/$1") == "$HOME/.dotfiles/"* ]]; }
 is() { [[ $1 == "$2" ]]; }
 
+# Run a snippet in an interactive shell on a pseudo-terminal, the way a person
+# would. Without a terminal bash complains about job control and zsh leaves out
+# its line editor, so the checks below would be judging a shell nobody runs.
+# The snippet's output and the shell's own stderr come back in separate files.
+in_shell() { # in_shell <bash|zsh> <snippet>
+  printf '%s\n' "$2" >"$tmp/snippet"
+  : >"$tmp/shell-out"
+  : >"$tmp/shell-err"
+  timeout 300 script -qec \
+    "$1 -i -c '. $tmp/snippet' >$tmp/shell-out 2>$tmp/shell-err" /dev/null \
+    </dev/null >/dev/null 2>&1
+}
+
+# Startup has to be silent whatever is installed, or every session opens with
+# noise. check reports this function's output, so a failure shows the noise.
+starts_silently() { # starts_silently <bash|zsh>
+  in_shell "$1" :
+  [[ ! -s $tmp/shell-err ]] || { cat "$tmp/shell-err"; return 1; }
+}
+
+# What an interactive shell holds in a variable once it has started.
+startup_var() { # startup_var <bash|zsh> <name>
+  in_shell "$1" "printf %s \"\${$2-}\""
+  cat "$tmp/shell-out"
+}
+
+# The PATH an interactive shell ends up with, one entry per line.
+startup_path() { startup_var "$1" PATH | tr ':' '\n'; }
+
+# check reports this function's output, so a mismatch shows what the shell
+# actually had, and what it complained about on the way there.
+has_var() { # has_var <bash|zsh> <name> <value>
+  local got
+  got=$(startup_var "$1" "$2")
+  [[ $got == "$3" ]] && return 0
+  printf '%s=%s\n' "$2" "$got"
+  cat "$tmp/shell-err"
+  return 1
+}
+
+# The tools the layers integrate with, stubbed: each integration runs and
+# leaves a mark, without the container needing the real thing.
+stub_tools() {
+  local tool
+  mkdir -p "$1"
+  for tool in starship zoxide fzf; do
+    printf '#!/bin/sh\nprintf "export %s_STUB=1\\n"\n' "${tool^^}" >"$1/$tool"
+    chmod +x "$1/$tool"
+  done
+}
+
 # Everything in the home directory: type, mode, link target and content.
 # chezmoi's state database is its own bookkeeping, rewritten on every run.
 snapshot() {
@@ -113,18 +168,46 @@ check fail "tracked git config holds no identity" git config --file "$HOME/.gitc
 secret_var=MAVEN_PUBLICATION"_PASSWORD"
 check fail "no Secret anywhere in the clone" grep -rq "$secret_var" "$HOME/.dotfiles"
 
-# Workstation-only Tracked configs: the zsh startup files assume a Workstation.
-if [[ $kind == workstation ]]; then
-  for startup_file in .zshrc .zprofile .zshenv .zlogin; do
-    check pass "$startup_file is a symlink into the clone" linked "$startup_file"
+# Shell layers. Every Machine gets the portable and zsh layers now; the macOS
+# layer belongs to a Mac alone, and neither container is one.
+for layer in .bashrc .bash_profile .zshrc .zshenv .config/shell/portable.sh .config/shell/zsh.zsh; do
+  check pass "$layer is a symlink into the clone" linked "$layer"
+done
+check fail "no macOS layer off a Mac" test -e "$HOME/.config/shell/macos.sh"
+check fail "the shell layers hold no Secret" grep -rq "$secret_var" "$HOME/.config/shell"
+check fail "no tracked config hard-codes a home directory" \
+  grep -rqE '/(Users|home)/[a-z]' "$HOME/.dotfiles/home"
+
+# Startup on a Machine that has none of the optional tools.
+for shell in bash zsh; do
+  check pass "interactive $shell starts silently" starts_silently $shell
+  check pass "$shell repeats no PATH entry" is "$(startup_path $shell | sort | uniq -d)" ""
+done
+
+# Each layer loads its Local override when it's there, and the checks above
+# already ran with none. The portable one has to reach both shells, the zsh one
+# only zsh, and an override is never tracked.
+printf 'export PORTABLE_OVERRIDE=1\n' >"$HOME/.config/shell/portable.local.sh"
+printf 'export ZSH_OVERRIDE=1\n' >"$HOME/.config/shell/zsh.local.zsh"
+for shell in bash zsh; do
+  check pass "$shell loads the portable Local override" has_var $shell PORTABLE_OVERRIDE 1
+done
+check pass "zsh loads the zsh Local override" has_var zsh ZSH_OVERRIDE 1
+check pass "bash is not given the zsh Local override" has_var bash ZSH_OVERRIDE ""
+check pass "an override leaves chezmoi with nothing to apply" chezmoi verify
+check fail "no Local override is tracked" git -C "$HOME/.dotfiles" ls-files --error-unmatch \
+  home/dot_config/shell/portable.local.sh
+rm -f "$HOME/.config/shell/portable.local.sh" "$HOME/.config/shell/zsh.local.zsh"
+
+# Startup once starship, fzf and zoxide are there.
+stub_tools "$HOME/.local/bin"
+for shell in bash zsh; do
+  check pass "interactive $shell starts silently with the tools installed" \
+    starts_silently $shell
+  for tool in STARSHIP FZF ZOXIDE; do
+    check pass "$shell runs the ${tool,,} integration" has_var $shell "${tool}_STUB" 1
   done
-  check fail "tracked zprofile holds no Secret" grep -q "$secret_var" "$HOME/.zprofile"
-  check pass "zprofile loads its Local override" grep -q "[.]zprofile[.]local" "$HOME/.zprofile"
-  check pass "zshrc loads its Local override" grep -q "[.]zshrc[.]local" "$HOME/.zshrc"
-else
-  check fail "Managed Machines get no zshrc" test -e "$HOME/.zshrc"
-  check fail "Managed Machines get no zprofile" test -e "$HOME/.zprofile"
-fi
+done
 
 before=$(snapshot)
 check pass "second run needs no answers" bootstrap

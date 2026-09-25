@@ -1,1 +1,8 @@
-. "$HOME/.cargo/env"
+# Every zsh reads this, interactive or not, so the Portable core goes here:
+# `zsh -c`, a #!/bin/zsh script and `ssh host somecmd` all need PATH. The
+# interactive half of the setup is in ~/.zshrc.
+shell_dir=${XDG_CONFIG_HOME:-$HOME/.config}/shell
+
+[[ -r $shell_dir/portable.sh ]] && source "$shell_dir/portable.sh"
+
+unset shell_dir

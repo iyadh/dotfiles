@@ -1,7 +1,5 @@
-{{/* The zsh startup files assume a Workstation; Managed Machines get the Portable core only. */}}
-{{ if ne .kind "workstation" -}}
-.zshrc
-.zprofile
-.zshenv
-.zlogin
+{{/* The macOS layer belongs to a Mac. Every Machine gets the rest: the
+     Portable core in bash and zsh, and the zsh layer on top of it. */}}
+{{ if ne .chezmoi.os "darwin" -}}
+.config/shell/macos.sh
 {{ end -}}

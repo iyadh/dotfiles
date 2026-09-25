@@ -1,94 +1,11 @@
-### Zinit plugin manager
-if [[ ! -f $HOME/.local/share/zinit/zinit.git/zinit.zsh ]]; then
-    print -P "%F{33} %F{220}Installing %F{33}ZDHARMA-CONTINUUM%F{220} Initiative Plugin Manager (%F{33}zdharma-continuum/zinit%F{220})…%f"
-    command mkdir -p "$HOME/.local/share/zinit" && command chmod g-rwX "$HOME/.local/share/zinit"
-    command git clone https://github.com/zdharma-continuum/zinit "$HOME/.local/share/zinit/zinit.git" && \
-        print -P "%F{33} %F{34}Installation successful.%f%b" || \
-        print -P "%F{160} The clone has failed.%f%b"
-fi
+# Interactive zsh. ~/.zshenv has already loaded the portable layer (and, on a
+# Mac, the macOS one), so this file adds the interactive half: the zsh layer,
+# then the integrations that have to wrap it.
+shell_dir=${XDG_CONFIG_HOME:-$HOME/.config}/shell
 
-source "$HOME/.local/share/zinit/zinit.git/zinit.zsh"
-autoload -Uz _zinit
-(( ${+_comps} )) && _comps[zinit]=_zinit
+[[ -r $shell_dir/zsh.zsh ]] && source "$shell_dir/zsh.zsh"
 
-# Zinit annexes
-zinit light-mode for \
-    zdharma-continuum/zinit-annex-as-monitor \
-    zdharma-continuum/zinit-annex-bin-gem-node \
-    zdharma-continuum/zinit-annex-patch-dl \
-    zdharma-continuum/zinit-annex-rust
+# Last: the prompt and the line-editor widgets wrap what the zsh layer loaded.
+command -v shell_tool_integrations >/dev/null && shell_tool_integrations
 
-# Node version manager (fnm)
-zinit light dominik-schwabe/zsh-fnm
-
-# Completions: compinit after early plugins, replay their compdefs,
-# then fzf-tab (must load after compinit, before widget-wrapping plugins)
-autoload -Uz compinit && compinit
-zinit cdreplay -q
-zinit light Aloxaf/fzf-tab
-zinit light zsh-users/zsh-autosuggestions
-zinit light zdharma-continuum/fast-syntax-highlighting
-
-### History
-HISTSIZE=100000
-SAVEHIST=100000
-HISTFILE="$HOME/.zsh_history"
-setopt SHARE_HISTORY          # share history across sessions
-setopt HIST_IGNORE_ALL_DUPS   # don't record duplicates
-setopt HIST_REDUCE_BLANKS     # strip superfluous blanks
-setopt HIST_VERIFY            # confirm before running history expansion
-
-### Completion styling
-zstyle ':completion:*' menu no
-zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
-zstyle ':fzf-tab:complete:cd:*' fzf-preview \
-  'eza --tree --icons --color=always --level=2 $realpath'
-zstyle ':fzf-tab:complete:z:*' fzf-preview \
-  'eza --tree --icons --color=always --level=2 $realpath'
-
-### Keybindings - type a prefix, press up/down to cycle matching history
-[[ -n "${terminfo[kcuu1]}" ]] && bindkey "${terminfo[kcuu1]}" history-beginning-search-backward
-[[ -n "${terminfo[kcud1]}" ]] && bindkey "${terminfo[kcud1]}" history-beginning-search-forward
-bindkey '^[[A' history-beginning-search-backward
-bindkey '^[[B' history-beginning-search-forward
-
-### Java (Homebrew openjdk@11; stable opt symlink avoids forking java_home on startup)
-export PATH="/opt/homebrew/opt/openjdk@11/bin:$PATH"
-export JAVA_HOME="/opt/homebrew/opt/openjdk@11/libexec/openjdk.jdk/Contents/Home"
-
-### Android
-export ANDROID_HOME="$HOME/Library/Android/sdk"
-export SDK_MANAGER=/opt/homebrew/bin/sdkmanager
-export AVD=/opt/homebrew/bin/avdmanager
-export ADB=/opt/homebrew/bin/adb
-
-### Bun
-export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH"
-[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
-
-### PATH
-export PATH="$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH"
-export PATH="$PATH:$HOME/.rvm/bin"                       # RVM
-export PATH="$PATH:$HOME/.local/bin"                     # pipx
-export PATH="$PATH:$HOME/.lmstudio/bin"                  # LM Studio CLI
-export PATH="$HOME/.antigravity/antigravity/bin:$PATH"   # Antigravity
-
-### Aliases
-alias brew='env PATH="${PATH//$(pyenv root)\/shims:/}" brew'
-alias pod='env GEM_HOME="" GEM_PATH="" /opt/homebrew/bin/pod'
-
-### Shell integrations
-source <(fzf --zsh)
-eval "$(zoxide init zsh)"
-eval "$(starship init zsh)"
-
-
-# Added by Antigravity CLI installer
-export PATH="/Users/iyadh/.local/bin:$PATH"
-
-# Added by Antigravity IDE
-export PATH="/Users/iyadh/.antigravity-ide/antigravity-ide/bin:$PATH"
-
-# Local override, never tracked: work and per-Machine settings.
-[[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
+unset shell_dir

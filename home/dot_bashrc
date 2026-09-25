@@ -1,0 +1,15 @@
+# Interactive bash: the Portable core, which is all bash is asked to carry.
+# A Managed Machine may have nothing else, so this file stays thin.
+case $- in
+  *i*) ;;
+  *) return ;;
+esac
+
+shell_dir=${XDG_CONFIG_HOME:-$HOME/.config}/shell
+
+[ -r "$shell_dir/portable.sh" ] && . "$shell_dir/portable.sh"
+
+# Last: the prompt and the line-editor bindings wrap what came before.
+command -v shell_tool_integrations >/dev/null 2>&1 && shell_tool_integrations
+
+unset shell_dir
