@@ -73,10 +73,13 @@ check() { # check <expect: pass|fail> <description> <command...>
   fi
 }
 
-# A Machine nobody has used: an empty home directory.
+# A Machine nobody has used. Not an empty directory: a real new account is
+# populated from /etc/skel, so it already carries the distribution's own
+# .bashrc and friends. Bootstrap meets those on every fresh Linux Machine.
 fresh_machine() {
   HOME=$(mktemp -d "$tmp/home.XXXX")
   export HOME
+  [[ -d /etc/skel ]] && cp -a /etc/skel/. "$HOME/"
   cd "$HOME" || exit 1
 }
 
@@ -193,11 +196,24 @@ fresh_machine
 clone_to "$HOME/.dotfiles"
 
 check pass "bootstrap from the clone" env DOTFILES_KIND="$kind" "$HOME/.dotfiles/bootstrap.sh"
+cp "$tmp/last" "$tmp/first-run" # what the first run said, for checks further down
 PATH=$HOME/.local/bin:$PATH # later scenarios reuse this chezmoi instead of downloading it again
 
 check pass "chezmoi installed without root" test -x "$HOME/.local/bin/chezmoi"
 check pass "git config is a symlink into the clone" linked .gitconfig
 check pass "git ignore is a symlink into the clone" linked .config/git/ignore
+
+# The distribution's own dotfiles were in the way and were set aside, not lost.
+# Debian's skel carries .bashrc, Arch's carries .bash_profile too.
+if [[ -f /etc/skel/.bashrc ]]; then
+  check pass "the distribution's .bashrc gave way to the tracked one" linked .bashrc
+  saved=$(echo "$HOME"/.dotfiles-backup/*/.bashrc)
+  check pass "and is still readable in the backup" test -s "$saved"
+  # In bash, not with cmp: the Arch image has no diffutils, and neither does
+  # Bootstrap assume one.
+  check pass "with its contents intact" is "$(cat "$saved" 2>/dev/null)" "$(cat /etc/skel/.bashrc)"
+  check pass "bootstrap said where it put them" grep -q "dotfiles-backup" "$tmp/first-run"
+fi
 # The prompt is part of the Portable core, so every Machine kind gets it.
 check pass "starship config is a symlink into the clone" linked .config/starship.toml
 check pass "git reads the tracked config" is "$(git config --global init.defaultBranch)" master
@@ -310,6 +326,26 @@ check pass "it names the file" grep -q "$HOME/.gitconfig" "$tmp/last"
 check pass "existing config is untouched" is "$(cat "$HOME/.gitconfig")" "$existing"
 check fail "existing config not replaced by a symlink" test -L "$HOME/.gitconfig"
 check fail "nothing else applied" test -e "$HOME/.config/git/ignore"
+
+# --- A distribution default the owner has edited ---------------------------
+#
+# The line above this one is the whole point: setting untouched defaults aside
+# must not become a licence to discard a file somebody has put work into.
+
+if [[ -f /etc/skel/.bashrc ]]; then
+  fresh_machine
+  clone_to "$HOME/.dotfiles"
+  printf '\nalias mine="something I wrote"\n' >>"$HOME/.bashrc"
+  edited=$(cat "$HOME/.bashrc")
+
+  check fail "bootstrap stops on an edited default" \
+    env DOTFILES_KIND="$kind" "$HOME/.dotfiles/bootstrap.sh"
+  check pass "it names the file" grep -q "$HOME/.bashrc" "$tmp/last"
+  check pass "the edit is untouched" is "$(cat "$HOME/.bashrc")" "$edited"
+  check fail "it was not replaced by a symlink" test -L "$HOME/.bashrc"
+  check fail "nothing was moved aside" test -e "$HOME/.dotfiles-backup"
+  check fail "nothing else applied" test -e "$HOME/.config/git/ignore"
+fi
 
 # --- Clone somewhere else --------------------------------------------------
 
