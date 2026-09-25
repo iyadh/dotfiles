@@ -27,6 +27,26 @@ die() {
   exit 1
 }
 
+# Is this a file the Machine put there and nobody has touched? A new account is
+# populated from /etc/skel, so a byte-identical copy carries nothing of its
+# owner's and can be set aside. Anything edited since, or absent from skel, is
+# the owner's and stops Bootstrap instead. Only regular files qualify: a symlink
+# already points somewhere deliberate.
+# Compared in bash rather than with cmp, which is diffutils and not on every
+# Machine: Bootstrap needs git and curl and nothing else. $(< f) strips trailing
+# newlines from both sides alike, so identical files still match, and a file
+# that differs only there is kept rather than deleted anyway.
+untouched_default() {
+  local target=$1 mine theirs
+  [[ -f $HOME/$target && ! -L $HOME/$target ]] || return 1
+  [[ -f /etc/skel/$target ]] || return 1
+  mine=$(<"$HOME/$target")
+  theirs=$(<"/etc/skel/$target")
+  # theirs is quoted: unquoted, [[ == ]] would read a .bashrc full of [ and *
+  # as a glob pattern and decide every file had been edited.
+  [[ $mine == "$theirs" ]]
+}
+
 # Run a command as root. Already root, nothing to do; otherwise sudo, which may
 # ask for a password on the terminal. No way to become root is not fatal here:
 # the only caller treats a failure as a warning.
@@ -117,12 +137,19 @@ main() {
   chezmoi "${init[@]}" ||
     die "chezmoi init failed. With no terminal to ask on, set DOTFILES_KIND=workstation or managed."
 
-  # Never overwrite a config chezmoi didn't create: chezmoi records every file it writes.
-  local target path conflicts=()
+  # Never overwrite a config chezmoi didn't create: chezmoi records every file
+  # it writes. The distribution's own untouched defaults are the exception, and
+  # are set aside rather than reported; everything else stops Bootstrap.
+  local target path conflicts=() defaults=()
   while IFS= read -r target; do
     path=$HOME/$target
     [[ -e $path || -L $path ]] || continue
-    [[ -z $(chezmoi state get --bucket=entryState --key="$path") ]] && conflicts+=("$path")
+    [[ -n $(chezmoi state get --bucket=entryState --key="$path") ]] && continue
+    if untouched_default "$target"; then
+      defaults+=("$target")
+    else
+      conflicts+=("$path")
+    fi
   done < <(chezmoi managed --include=files,symlinks --path-style=relative)
 
   if ((${#conflicts[@]} > 0)); then
@@ -131,6 +158,17 @@ main() {
     printf '  Nothing was changed. Move them aside (keep Local overrides, such as\n' >&2
     printf '  per-client git includes, in ~/.gitconfig.local), then re-run.\n' >&2
     exit 1
+  fi
+
+  # Only once nothing is going to stop us, so a refusal really changes nothing.
+  if ((${#defaults[@]} > 0)); then
+    local backup
+    backup=$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)
+    say "Keeping this Machine's untouched defaults in $backup"
+    for target in "${defaults[@]}"; do
+      mkdir -p "$backup/$(dirname "$target")"
+      mv "$HOME/$target" "$backup/$target"
+    done
   fi
 
   say "Applying Tracked configs"
