@@ -4,7 +4,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/iyadh/dotfiles/master/bootstrap.sh | bash
 #   ~/.dotfiles/bootstrap.sh
 #
-# Needs git and curl. No root. Environment:
+# Needs git and curl. Root is only used to install a Managed Machine's shell
+# tools, and Bootstrap carries on without it. Environment:
 #   DOTFILES_KIND  workstation or managed: answers the one-time Machine kind question
 #   DOTFILES_REPO  what to clone into ~/.dotfiles when it doesn't exist yet
 set -euo pipefail
@@ -13,10 +14,63 @@ dir=$HOME/.dotfiles
 repo=${DOTFILES_REPO:-https://github.com/iyadh/dotfiles.git}
 bin=$HOME/.local/bin
 
+# The shell tools the Portable core expects on every Machine. A Workstation
+# gets its packages in stage 2, so Bootstrap only installs these on a Managed
+# Machine. Each name is both the package and the command it provides, which is
+# how a second run knows there is nothing left to do.
+managed_tools=(starship fzf zoxide)
+
 say() { printf '==> %s\n' "$*"; }
+warn() { printf '!  %s\n' "$*" >&2; }
 die() {
   printf '✗ %s\n' "$@" >&2
   exit 1
+}
+
+# Run a command as root. Already root, nothing to do; otherwise sudo, which may
+# ask for a password on the terminal. No way to become root is not fatal here:
+# the only caller treats a failure as a warning.
+as_root() {
+  if [[ $(id -u) -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null; then
+    sudo "$@"
+  else
+    return 1
+  fi
+}
+
+# Install the Managed Machine's shell tools, one at a time so that one package
+# the distribution doesn't carry can't stop the others from arriving.
+install_managed_tools() {
+  local tool missing=()
+  for tool in "${managed_tools[@]}"; do
+    command -v "$tool" >/dev/null || missing+=("$tool")
+  done
+  ((${#missing[@]} > 0)) || return 0 # a second run finds them all and installs nothing
+
+  local pm
+  if command -v apt-get >/dev/null; then
+    pm=apt
+  elif command -v pacman >/dev/null; then
+    pm=pacman
+  else
+    warn "No apt or pacman here, so ${missing[*]} are not installed."
+    return 0
+  fi
+
+  say "Installing ${missing[*]}"
+  case $pm in
+    apt) as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true ;;
+    pacman) as_root pacman -Sy --noconfirm --quiet >/dev/null 2>&1 || true ;;
+  esac
+
+  for tool in "${missing[@]}"; do
+    case $pm in
+      apt) as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$tool" >/dev/null 2>&1 ;;
+      pacman) as_root pacman -S --noconfirm --needed --quiet "$tool" >/dev/null 2>&1 ;;
+    esac || warn "Could not install $tool. Bootstrap carried on without it."
+  done
 }
 
 # Piped from a URL, bash reads this script from stdin as it runs. Wrapping it in
@@ -83,6 +137,13 @@ main() {
   chezmoi apply
 
   git -C "$dir" config core.hooksPath .githooks
+
+  # Ask chezmoi rather than DOTFILES_KIND, which is only set on the first run.
+  local kind
+  kind=$(chezmoi execute-template '{{ .kind }}' 2>/dev/null) || kind=
+  if [[ $kind == managed ]]; then
+    install_managed_tools
+  fi
 
   say "Done. Update later with: chezmoi update"
   if [[ $on_path == false ]]; then

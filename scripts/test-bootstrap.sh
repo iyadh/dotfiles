@@ -28,21 +28,28 @@ case $distro in
     case $2 in
       debian)
         export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq >/dev/null && apt-get install -y -qq git curl ca-certificates zsh >/dev/null || exit 1
+        apt-get update -qq >/dev/null && apt-get install -y -qq git curl ca-certificates zsh sudo >/dev/null || exit 1
         ;;
       arch)
         # The download sandbox fails under amd64 emulation (Apple Silicon); nothing to protect here.
-        pacman -Sy --noconfirm --needed --quiet --disable-sandbox git curl zsh >/dev/null || exit 1
+        pacman -Sy --noconfirm --needed --quiet --disable-sandbox git curl zsh sudo >/dev/null || exit 1
         ;;
       *) exit 2 ;;
     esac
     useradd --create-home "$user"
+    # A Managed Machine's owner can become root to install packages. Without a
+    # terminal there is nobody to type a password, so make it passwordless.
+    printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$user" >"/etc/sudoers.d/$user"
+    chmod 440 "/etc/sudoers.d/$user"
     exec runuser -u "$user" -- bash /src/scripts/test-bootstrap.sh --checks "$3"
     ;;
-  # A real terminal always says what it is, and tools like tput need to know.
+  # A real terminal always says what it is, and tools like tput and starship
+  # need to know. A container leaves TERM unset or "dumb", which is not the
+  # terminal these checks are standing in for.
   --checks)
     kind=$2
-    export TERM=${TERM:-xterm-256color}
+    [[ ${TERM:-dumb} == dumb ]] && TERM=xterm-256color
+    export TERM
     ;;
   *) echo "usage: $0 [debian|arch]" >&2 && exit 2 ;;
 esac
@@ -147,6 +154,27 @@ snapshot() {
     done
 }
 
+# --- A Managed Machine whose owner can't become root -----------------------
+#
+# First, because the packages a later scenario installs stay installed for the
+# rest of the container: once starship is on PATH there is no missing package
+# left to fail on. A Workstation never reaches the install, so it skips this.
+
+if [[ $kind == managed ]]; then
+  fresh_machine
+  clone_to "$HOME/.dotfiles"
+
+  # A sudo that refuses, the way an account outside sudoers behaves.
+  mkdir -p "$HOME/norootbin"
+  printf '#!/bin/sh\nexit 1\n' >"$HOME/norootbin/sudo"
+  chmod +x "$HOME/norootbin/sudo"
+
+  check pass "bootstrap finishes without a way to become root" \
+    env DOTFILES_KIND="$kind" PATH="$HOME/norootbin:$PATH" "$HOME/.dotfiles/bootstrap.sh"
+  check pass "it warns about the tools it couldn't install" grep -qi "could not install" "$tmp/last"
+  check pass "the Tracked configs still went in" linked .gitconfig
+fi
+
 # --- Run from a clone ------------------------------------------------------
 
 fresh_machine
@@ -168,6 +196,17 @@ check fail "tracked git config holds no identity" git config --file "$HOME/.gitc
 secret_var=MAVEN_PUBLICATION"_PASSWORD"
 check fail "no Secret anywhere in the clone" grep -rq "$secret_var" "$HOME/.dotfiles"
 
+# The shell tools the Portable core expects. A Managed Machine gets them from
+# its package manager during Bootstrap; a Workstation's packages are stage 2.
+# Before the stubs further down, which would answer for the real thing.
+for tool in starship fzf zoxide; do
+  if [[ $kind == managed ]]; then
+    check pass "$tool installed on a Managed Machine" command -v "$tool"
+  else
+    check fail "$tool not installed on a Workstation" command -v "$tool"
+  fi
+done
+
 # Shell layers. Every Machine gets the portable and zsh layers now; the macOS
 # layer belongs to a Mac alone, and neither container is one.
 for layer in .bashrc .bash_profile .zshrc .zshenv .config/shell/portable.sh .config/shell/zsh.zsh; do
@@ -178,7 +217,9 @@ check fail "the shell layers hold no Secret" grep -rq "$secret_var" "$HOME/.conf
 check fail "no tracked config hard-codes a home directory" \
   grep -rqE '/(Users|home)/[a-z]' "$HOME/.dotfiles/home"
 
-# Startup on a Machine that has none of the optional tools.
+# Startup with whatever this Machine kind actually has: a Workstation has none
+# of the optional tools, so it exercises the quiet-skip path; a Managed Machine
+# has the three Bootstrap just installed.
 for shell in bash zsh; do
   check pass "interactive $shell starts silently" starts_silently $shell
   check pass "$shell repeats no PATH entry" is "$(startup_path $shell | sort | uniq -d)" ""
@@ -211,6 +252,7 @@ done
 
 before=$(snapshot)
 check pass "second run needs no answers" bootstrap
+check fail "second run installs nothing" grep -qi "installing" "$tmp/last"
 check pass "second run changes nothing" is "$(snapshot)" "$before"
 
 printf '[user]\n\temail = client@example.com\n' >"$HOME/.gitconfig.local"
