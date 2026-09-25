@@ -1,0 +1,39 @@
+# Local override, never tracked: Machines, servers, and anything naming a
+# client or carrying an address. First in the file on purpose — ssh keeps the
+# FIRST value it is given for most keywords, so an override has to be read
+# before the defaults below to win. A file that isn't there is not an error.
+Include ~/.ssh/config.local
+
+# UseKeychain is macOS only. Without this line ssh on a Linux Workstation
+# rejects the whole file — "Bad configuration option" — and every connection
+# fails, not just the keychain part.
+IgnoreUnknown UseKeychain
+
+# Each alias below is one GitHub identity and the key it uses. IdentitiesOnly
+# is what makes that true: without it ssh also offers whatever the agent holds,
+# so an alias whose own key GitHub won't accept doesn't fail — it quietly
+# authenticates as whichever other identity the agent could satisfy.
+Host github.com
+  Hostname github.com
+  AddKeysToAgent yes
+  UseKeychain yes
+  IdentitiesOnly yes
+  IdentityFile ~/.ssh/id_ed25519
+
+Host github.com-vo
+  Hostname github.com
+  AddKeysToAgent yes
+  UseKeychain yes
+  IdentitiesOnly yes
+  IdentityFile ~/.ssh/id_ed25519-vo
+
+Host github.com-atf
+  Hostname github.com
+  AddKeysToAgent yes
+  UseKeychain yes
+  IdentitiesOnly yes
+  IdentityFile ~/.ssh/id_ed25519_atf
+
+# Fig ssh integration. Keep at the bottom of this file.
+Match all
+  Include ~/.fig/ssh

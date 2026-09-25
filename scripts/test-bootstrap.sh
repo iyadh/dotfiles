@@ -28,11 +28,11 @@ case $distro in
     case $2 in
       debian)
         export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq >/dev/null && apt-get install -y -qq git curl ca-certificates zsh sudo >/dev/null || exit 1
+        apt-get update -qq >/dev/null && apt-get install -y -qq git curl ca-certificates zsh sudo openssh-client >/dev/null || exit 1
         ;;
       arch)
         # The download sandbox fails under amd64 emulation (Apple Silicon); nothing to protect here.
-        pacman -Sy --noconfirm --needed --quiet --disable-sandbox git curl zsh sudo >/dev/null || exit 1
+        pacman -Sy --noconfirm --needed --quiet --disable-sandbox git curl zsh sudo openssh >/dev/null || exit 1
         ;;
       *) exit 2 ;;
     esac
@@ -94,6 +94,12 @@ bootstrap() { timeout 120 "$HOME/.dotfiles/bootstrap.sh" </dev/null; }
 linked() { [[ -L $HOME/$1 && $(readlink "$HOME/$1") == "$HOME/.dotfiles/"* ]]; }
 is() { [[ $1 == "$2" ]]; }
 
+# Does anything among the Tracked configs match this name? find exits 0 whether
+# or not it matched, so the match itself has to be what decides.
+tracked_matches() { # tracked_matches <find -name pattern>
+  [[ -n $(find "$HOME/.dotfiles/home" -name "$1" -type f -print -quit) ]]
+}
+
 # Run a snippet in an interactive shell on a pseudo-terminal, the way a person
 # would. Without a terminal bash complains about job control and zsh leaves out
 # its line editor, so the checks below would be judging a shell nobody runs.
@@ -144,6 +150,27 @@ has_var() { # has_var <bash|zsh> <name> <value>
   printf '%s=%s\n' "$2" "$got"
   cat "$tmp/shell-err"
   return 1
+}
+
+# ssh -G resolves a host's effective config without connecting, so it is the
+# cheap way to ask whether ssh accepts the file at all: a keyword it doesn't
+# know makes it reject the whole config and exit 255.
+#
+# Always with -F. ssh finds its default config through the password database,
+# not $HOME, and every scenario here runs in a temp home — so without -F ssh
+# ignores the tracked file and answers from its own built-in defaults. That is
+# how an earlier version of these checks "passed" while reading nothing: the
+# personal key it looked for, ~/.ssh/id_ed25519, is a built-in default.
+ssh_uses_key() { # ssh_uses_key <config> <alias> <key file name>
+  local out
+  out=$(ssh -F "$1" -G "$2" 2>&1)
+  grep -q "identityfile .*/$3\$" <<<"$out" && return 0
+  printf '%s resolved to: %s\n' "$2" "$(grep '^identityfile' <<<"$out" | tr '\n' ' ')"
+  return 1
+}
+
+ssh_hostname_for() { # ssh_hostname_for <config> <alias>
+  ssh -F "$1" -G "$2" 2>/dev/null | awk '/^hostname /{print $2; exit}'
 }
 
 # The tools the layers integrate with, stubbed: each integration runs and
@@ -216,6 +243,52 @@ if [[ -f /etc/skel/.bashrc ]]; then
 fi
 # The prompt is part of the Portable core, so every Machine kind gets it.
 check pass "starship config is a symlink into the clone" linked .config/starship.toml
+
+# ssh: a Workstation reaches out, a Managed Machine is what you reach. Only the
+# GitHub aliases are tracked; addresses and Machines live in a Local override.
+# Scanned over the Tracked configs, not the whole clone: the pre-commit hook
+# legitimately carries the phrase, because scanning for it is its job. Split so
+# this file doesn't match either.
+key_marker="PRIVATE"" KEY"
+check fail "no key material among the Tracked configs" \
+  grep -rlq "$key_marker" "$HOME/.dotfiles/home"
+check fail "no key file is tracked" tracked_matches 'id_*'
+
+if [[ $kind == workstation ]]; then
+  check pass "ssh config is a symlink into the clone" linked .ssh/config
+  check pass "the .ssh directory is the owner's alone" is "$(stat -c %a "$HOME/.ssh")" 700
+
+  ssh_cfg=$HOME/.ssh/config
+  # The real test of the Import: Linux ssh rejects the whole file over one
+  # macOS-only keyword, and then every connection fails, not just that part.
+  check pass "ssh accepts the tracked config" ssh -F "$ssh_cfg" -G github.com
+  check pass "the personal alias picks its own key" \
+    ssh_uses_key "$ssh_cfg" github.com id_ed25519
+  for client in vo atf; do
+    check pass "the $client alias picks its own key" \
+      ssh_uses_key "$ssh_cfg" "github.com-$client" "id_ed25519[-_]$client"
+  done
+
+  # Without this, ssh also offers the agent's keys and an alias whose own key
+  # is refused authenticates as some other identity rather than failing.
+  for alias_host in github.com github.com-vo github.com-atf; do
+    check pass "$alias_host offers its key alone" \
+      grep -qx "identitiesonly yes" <(ssh -F "$ssh_cfg" -G "$alias_host" 2>/dev/null)
+  done
+
+  # A Local override is read first, so it can overrule a tracked default.
+  # Written into $HOME: ssh takes its default config path from the password
+  # database, which is why -F is needed above, but it expands the ~ inside an
+  # Include from $HOME. The two are not the same thing here.
+  printf 'Host github.com\n  Hostname override.example\n' >"$HOME/.ssh/config.local"
+  check pass "a Local override outranks the tracked config" \
+    is "$(ssh_hostname_for "$ssh_cfg" github.com)" override.example
+  rm -f "$HOME/.ssh/config.local"
+  check pass "and removing it restores the tracked value" \
+    is "$(ssh_hostname_for "$ssh_cfg" github.com)" github.com
+else
+  check fail "Managed Machines get no ssh config" test -e "$HOME/.ssh/config"
+fi
 check pass "git reads the tracked config" is "$(git config --global init.defaultBranch)" master
 check pass "chezmoi has nothing to apply" chezmoi verify
 check pass "clone's hooks path points at its hooks" is "$(git -C "$HOME/.dotfiles" config core.hooksPath)" .githooks
