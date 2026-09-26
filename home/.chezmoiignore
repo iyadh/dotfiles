@@ -3,3 +3,8 @@
 {{ if ne .chezmoi.os "darwin" -}}
 .config/shell/macos.sh
 {{ end -}}
+{{/* The ssh config is a Workstation's: a Managed Machine is something you
+     reach over ssh, not something you reach out from. */}}
+{{ if ne .kind "workstation" -}}
+.ssh/config
+{{ end -}}
